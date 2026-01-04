@@ -1,0 +1,80 @@
+<!-- public/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Laptop Finance Tracker</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        padding: 50px;
+        text-align: center;
+      }
+      input {
+        padding: 10px;
+        margin: 10px;
+        width: 300px;
+        display: block;
+        margin-left: auto;
+        margin-right: auto;
+      }
+      button {
+        padding: 10px 20px;
+        cursor: pointer;
+        background-color: #28a745;
+        color: white;
+        border: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Finance Option Tracker</h1>
+    <!-- Make sure these IDs match the JavaScript below exactly -->
+    <input type="text" id="url" placeholder="Paste Laptop Link" />
+    <input type="text" id="keyword" placeholder="Keyword (e.g. finance)" />
+    <input type="text" id="phone" placeholder="Phone (e.g. +1234567890)" />
+
+    <button onclick="startTracking()">Start Monitoring</button>
+
+    <script>
+      async function startTracking() {
+        // 1. Get the values
+        const urlVal = document.getElementById("url").value;
+        const keywordVal = document.getElementById("keyword").value;
+        const phoneVal = document.getElementById("phone").value;
+
+        // 2. Validate inside the browser first
+        if (!urlVal || !keywordVal || !phoneVal) {
+          alert("Please fill in ALL fields, including phone number.");
+          return;
+        }
+
+        console.log("Sending:", {
+          url: urlVal,
+          keyword: keywordVal,
+          phoneNumber: phoneVal,
+        });
+
+        // 3. Send to server
+        const res = await fetch("/api/monitor", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: urlVal,
+            keyword: keywordVal,
+            phoneNumber: phoneVal,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (res.status === 200) {
+          alert(data.message);
+        } else {
+          alert("Error: " + JSON.stringify(data));
+        }
+      }
+    </script>
+  </body>
+</html>
