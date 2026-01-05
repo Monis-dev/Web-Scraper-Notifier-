@@ -30,22 +30,22 @@
   </head>
   <body>
     <h1>Finance Option Tracker</h1>
-    <!-- Make sure these IDs match the JavaScript below exactly -->
     <input type="text" id="url" placeholder="Paste Laptop Link" />
     <input type="text" id="keyword" placeholder="Keyword (e.g. finance)" />
+    <input type="text" id="context" placeholder="Must be near? (e.g. No Cost)">
+      <small style="display:block; margin-bottom:10px;">Leave "Must be near" empty for simple search</small>
     <input type="text" id="phone" placeholder="Phone (e.g. +1234567890)" />
 
     <button onclick="startTracking()">Start Monitoring</button>
 
     <script>
       async function startTracking() {
-        // 1. Get the values
         const urlVal = document.getElementById("url").value;
         const keywordVal = document.getElementById("keyword").value;
+        const requiredContextVal = document.getElementById('context').value; 
         const phoneVal = document.getElementById("phone").value;
 
-        // 2. Validate inside the browser first
-        if (!urlVal || !keywordVal || !phoneVal) {
+        if (!urlVal || !keywordVal || !requiredContextVal || !phoneVal) {
           alert("Please fill in ALL fields, including phone number.");
           return;
         }
@@ -53,6 +53,7 @@
         console.log("Sending:", {
           url: urlVal,
           keyword: keywordVal,
+          requiredContext: requiredContextVal,
           phoneNumber: phoneVal,
         });
 
@@ -63,6 +64,7 @@
           body: JSON.stringify({
             url: urlVal,
             keyword: keywordVal,
+            requiredContext: requiredContextVal,
             phoneNumber: phoneVal,
           }),
         });

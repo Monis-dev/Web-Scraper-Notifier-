@@ -2,7 +2,7 @@ import express from "express";
 import mongoose from "mongoose";
 import cron from "node-cron";
 import dotenv from "dotenv";
-import path from "path";
+import path, { resolve } from "path";
 import { fileURLToPath } from "url";
 import twilio from "twilio";
 
@@ -25,10 +25,26 @@ mongoose
 
 app.post("/api/monitor", async (req, res) => {
   try {
-    const { url, keyword, phoneNumber } = req.body;
-    console.log("Received data:", { url, keyword, phoneNumber });
+    const { url, keyword, requiredContext, phoneNumber } = req.body;
+    console.log("Received data:", {
+      url,
+      keyword,
+      requiredContext,
+      phoneNumber,
+    });
 
-    const newTask = new Task({ url, keyword, phoneNumber });
+    const existing = await Task.findOne({
+      url,
+      keyword,
+      requiredContext,
+      phoneNumber,
+      isActive: true,
+    });
+    if (existing) { 
+      return res.status(400).json({ error: "You have already tracking this item!"})
+    }
+
+    const newTask = new Task({ url, keyword, requiredContext, phoneNumber });
     await newTask.save();
 
     res.json({ message: "Tracking started successfully!" });
@@ -38,34 +54,43 @@ app.post("/api/monitor", async (req, res) => {
   }
 });
 
-cron.schedule("0 * * * * *", async () => {
-  console.log("Running check...");
+let isScanning = false;
+
+cron.schedule("0 */3 * * *", async () => {
+  // 1. CHECK LOCK
+  if (isScanning) {
+    console.log("⚠️ Skipping cycle: Previous scan is still busy.");
+    return;
+  }
+
+  isScanning = true;
+  console.log("⏰ Running check...");
 
   try {
     const tasks = await Task.find({ isActive: true });
 
     for (const task of tasks) {
-      const found = await checkWebsiteForKeyword(task.url, task.keyword);
+      const found = await checkWebsiteForKeyword(
+        task.url,
+        task.keyword,
+        task.requiredContext
+      );
 
       if (found) {
-        console.log(`MATCH FOUND: ${task.keyword}`);
-
-        await sendWhatsApp(
-          task.phoneNumber,
-          `Found "${task.keyword}"! Check link: ${task.url}`
-        );
-
-        // Stop tracking
+        console.log("🎉 MATCH FOUND!");
+        await sendWhatsApp(task.phoneNumber, `Found it! ${task.url}`);
         task.isActive = false;
         await task.save();
-      } else {
-        console.log(`... No match for "${task.keyword}" yet`);
       }
+      await new Promise((r) => setTimeout(r, 2000));
     }
   } catch (error) {
-    console.error("Cron Job Error:", error);
+    console.error("Loop Error:", error);
+  } finally {
+    isScanning = false;
   }
 });
+
 
 const sendWhatsApp = async (to, message) => {
   try {
