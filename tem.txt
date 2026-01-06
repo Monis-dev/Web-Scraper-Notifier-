@@ -1,0 +1,372 @@
+import puppeteer from "puppeteer";
+
+async function safeGoto(page, url, retries = 3) {
+  for (let i = 1; i <= retries; i++) {
+    try {
+      console.log(`🌐 Navigating (attempt ${i})`);
+      await page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: 90000,
+      });
+      return true;
+    } catch (err) {
+      console.log(`⚠️ Navigation failed: ${err.message}`);
+      if (i === retries) throw err;
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+}
+
+// NEW: Set Indian pincode on Flipkart
+async function setFlipkartPincode(page, pincode = "462030") {
+  try {
+    console.log(`📍 Setting pincode: ${pincode}`);
+
+    // Look for pincode input/button
+    const pincodeSet = await page.evaluate((pin) => {
+      // Method 1: Find "Enter Delivery Pincode" or similar
+      const inputs = Array.from(document.querySelectorAll("input"));
+      for (let input of inputs) {
+        const placeholder = (input.placeholder || "").toLowerCase();
+        const label = input.getAttribute("aria-label")?.toLowerCase() || "";
+
+        if (
+          placeholder.includes("pincode") ||
+          placeholder.includes("pin code") ||
+          label.includes("pincode")
+        ) {
+          input.value = pin;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+
+          // Find and click associated button
+          const parent = input.closest("div");
+          const button = parent?.querySelector("button");
+          if (button) {
+            button.click();
+            return "input_method";
+          }
+        }
+      }
+
+      // Method 2: Look for delivery pincode link/button
+      const elements = Array.from(
+        document.querySelectorAll("span, div, a, button")
+      );
+      for (let el of elements) {
+        const text = el.innerText?.toLowerCase().trim() || "";
+        if (
+          text.includes("delivery pincode") ||
+          text.includes("enter pincode") ||
+          text === "change"
+        ) {
+          el.click();
+          return "click_method";
+        }
+      }
+
+      return null;
+    }, pincode);
+
+    if (pincodeSet) {
+      console.log(`🖱️ Pincode trigger: ${pincodeSet}`);
+      await new Promise((r) => setTimeout(r, 2000));
+
+      // If we clicked to open a modal, now enter the pincode
+      if (pincodeSet === "click_method") {
+        await page.evaluate((pin) => {
+          const inputs = Array.from(document.querySelectorAll("input"));
+          for (let input of inputs) {
+            if (input.offsetParent !== null) {
+              // is visible
+              const placeholder = (input.placeholder || "").toLowerCase();
+              if (
+                placeholder.includes("pincode") ||
+                placeholder.includes("pin")
+              ) {
+                input.value = pin;
+                input.dispatchEvent(new Event("input", { bubbles: true }));
+
+                // Click submit/check button
+                const container = input.closest(
+                  'div[role="dialog"], div.modal, div._2aK_uc'
+                );
+                if (container) {
+                  const buttons = container.querySelectorAll("button");
+                  for (let btn of buttons) {
+                    if (btn.innerText.toLowerCase().includes("check")) {
+                      btn.click();
+                      return true;
+                    }
+                  }
+                }
+              }
+            }
+          }
+          return false;
+        }, pincode);
+
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+
+      return true;
+    }
+
+    console.log("⚠️ No pincode input found");
+    return false;
+  } catch (err) {
+    console.log(`⚠️ Pincode setting error: ${err.message}`);
+    return false;
+  }
+}
+
+// NEW: Set cookies to simulate Indian session
+async function setIndianSession(page) {
+  try {
+    // Set cookies that indicate Indian location
+    await page.setCookie(
+      {
+        name: "SN",
+        value: "V1.1", // Flipkart session
+        domain: ".flipkart.com",
+      },
+      {
+        name: "T",
+        value: "TI" + Date.now(), // Tracking ID
+        domain: ".flipkart.com",
+      }
+    );
+
+    console.log("🍪 Set Indian session cookies");
+  } catch (err) {
+    console.log("⚠️ Cookie setting skipped");
+  }
+}
+
+function searchInText(pageText, keyword, requiredContext) {
+  const mainWord = keyword.toLowerCase();
+  const contextWord = requiredContext ? requiredContext.toLowerCase() : "";
+
+  if (!pageText.includes(mainWord) || !pageText.includes(contextWord)) {
+    return false;
+  }
+
+  let searchIndex = 0;
+  while ((searchIndex = pageText.indexOf(mainWord, searchIndex)) !== -1) {
+    const start = Math.max(0, searchIndex - 3500);
+    const end = Math.min(pageText.length, searchIndex + 3500);
+    const windowText = pageText.substring(start, end);
+
+    if (windowText.includes(contextWord)) {
+      return true;
+    }
+    searchIndex += mainWord.length;
+  }
+
+  return false;
+}
+
+export const checkWebsiteForKeyword = async (url, keyword, requiredContext) => {
+  console.time("Scrape Duration");
+  let browser;
+
+  // Get pincode from environment variable or use default Delhi pincode
+  const PINCODE = process.env.FLIPKART_PINCODE || "462030";
+
+  try {
+    browser = await puppeteer.launch({
+      headless: "new",
+      slowMo: 50,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-accelerated-2d-canvas",
+        "--disable-gpu",
+        "--window-size=1920,1080",
+        // Spoof Indian location
+        "--lang=en-IN,en",
+        "--accept-lang=en-IN,en",
+      ],
+    });
+
+    const page = await browser.newPage();
+
+    // Set geolocation to India (Delhi coordinates)
+    await page.setGeolocation({ latitude: 28.6139, longitude: 77.209 });
+
+    // Set Indian timezone
+    await page.emulateTimezone("Asia/Kolkata");
+
+    // Indian user agent
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    );
+
+    // Set extra headers
+    await page.setExtraHTTPHeaders({
+      "Accept-Language": "en-IN,en-US;q=0.9,en;q=0.8",
+    });
+
+    // ==============================
+    // 🛍️ FLIPKART LOGIC
+    // ==============================
+    if (url.includes("flipkart.com")) {
+      // Set cookies before navigation
+      await setIndianSession(page);
+
+      await safeGoto(page, url);
+      await new Promise((r) => setTimeout(r, 2000));
+
+      // CRITICAL: Set pincode first
+      await setFlipkartPincode(page, PINCODE);
+
+      // Now proceed with normal scraping
+      try {
+        await page.evaluate(() => window.scrollBy(0, 500));
+        await new Promise((r) => setTimeout(r, 1000));
+
+        const clickResult = await page.evaluate(() => {
+          const spans = Array.from(
+            document.querySelectorAll("span, div, a, li")
+          );
+          for (let el of spans) {
+            if (
+              el.innerText &&
+              el.innerText.trim().toLowerCase() === "view plans"
+            ) {
+              el.click();
+              return "Clicked 'View Plans'";
+            }
+          }
+
+          const linkButtons = document.querySelectorAll("._3X7Jj1");
+          for (let btn of linkButtons) {
+            const parentText = btn.parentElement
+              ? btn.parentElement.innerText.toLowerCase()
+              : "";
+            if (parentText.includes("no cost") || parentText.includes("emi")) {
+              btn.click();
+              return "Clicked Class ._3X7Jj1";
+            }
+          }
+          return false;
+        });
+
+        if (clickResult) {
+          console.log(`🖱️ Flipkart: ${clickResult}`);
+          await new Promise((r) => setTimeout(r, 4000));
+        }
+      } catch (err) {
+        console.log("⚠️ Flipkart click error:", err.message);
+      }
+
+      try {
+        // Click "Available offers"
+        await page.evaluate(() => {
+          const nodes = Array.from(
+            document.querySelectorAll("span, div, button")
+          );
+          for (const n of nodes) {
+            const t = n.innerText?.toLowerCase().trim();
+            if (t === "available offers" || t === "offers") {
+              n.click();
+              return true;
+            }
+          }
+          return false;
+        });
+
+        await new Promise((r) => setTimeout(r, 3000));
+
+        // Scroll offers container
+        await page.evaluate(async () => {
+          const containers = Array.from(
+            document.querySelectorAll("div")
+          ).filter(
+            (d) =>
+              d.scrollHeight > d.clientHeight &&
+              d.innerText?.toLowerCase().includes("bank")
+          );
+
+          if (!containers.length) return;
+
+          const container = containers[0];
+          for (let i = 0; i < 6; i++) {
+            container.scrollTop = container.scrollHeight;
+            await new Promise((r) => setTimeout(r, 800));
+          }
+        });
+
+        await new Promise((r) => setTimeout(r, 2000));
+      } catch (e) {
+        console.log("⚠️ Flipkart offers scroll skipped");
+      }
+    }
+
+    // ==============================
+    // 📦 AMAZON LOGIC
+    // ==============================
+    else if (url.includes("amazon")) {
+      await safeGoto(page, url);
+
+      try {
+        console.log("🕵️ Detected Amazon. Analyzing page...");
+        await page.evaluate(() => window.scrollBy(0, 400));
+        await new Promise((r) => setTimeout(r, 2000));
+
+        const clickResult = await page.evaluate(() => {
+          const links = Array.from(document.querySelectorAll("a, span"));
+          for (let el of links) {
+            const t = el.innerText ? el.innerText.trim().toLowerCase() : "";
+            if (t === "emi options" || t === "details") {
+              const parent = el.closest(".a-section") || el.parentElement;
+              const parentText = parent ? parent.innerText.toLowerCase() : "";
+
+              if (
+                parentText.includes("emi") ||
+                parentText.includes("no cost")
+              ) {
+                el.click();
+                return `Clicked "${t}"`;
+              }
+            }
+          }
+          return false;
+        });
+
+        if (clickResult) {
+          console.log(`🖱️ Amazon: ${clickResult}`);
+          await new Promise((r) => setTimeout(r, 5000));
+        }
+      } catch (err) {
+        console.log("⚠️ Amazon click error:", err.message);
+      }
+    } else {
+      await safeGoto(page, url);
+    }
+
+    // ==============================
+    // 🔍 TEXT SEARCH
+    // ==============================
+    const pageText = await page.evaluate(() =>
+      document.body.innerText.toLowerCase().replace(/\s+/g, " ")
+    );
+
+    const result = searchInText(pageText, keyword, requiredContext);
+
+    if (result) {
+      console.log(`✅ MATCH FOUND!`);
+    } else {
+      console.log("❌ No Match.");
+    }
+
+    await browser.close();
+    console.timeEnd("Scrape Duration");
+    return result;
+  } catch (error) {
+    if (browser) await browser.close();
+    console.error(`❌ Error: ${error.message}`);
+    return false;
+  }
+};

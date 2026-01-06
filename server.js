@@ -56,7 +56,7 @@ app.post("/api/monitor", async (req, res) => {
 
 let isScanning = false;
 
-cron.schedule("0 */3 * * *", async () => {
+cron.schedule("*/1 * * * *", async () => {
   // 1. CHECK LOCK
   if (isScanning) {
     console.log("⚠️ Skipping cycle: Previous scan is still busy.");
