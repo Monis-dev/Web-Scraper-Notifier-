@@ -1,11 +1,6 @@
 import puppeteer from "puppeteer";
 
 export const checkWebsiteForKeyword = async (url, keyword, requiredContext) => {
-  // Clear previous timer if it exists to stop the "Label exists" warning
-  try {
-    console.timeEnd("Scrape Duration");
-  } catch (e) {}
-
   console.time("Scrape Duration");
   console.log(`\n--- 🚀 Checking: ${url} ---`);
 
@@ -13,38 +8,17 @@ export const checkWebsiteForKeyword = async (url, keyword, requiredContext) => {
   try {
     browser = await puppeteer.launch({
       headless: "new",
-      // CRITICAL: Tell Puppeteer where Chrome is in Docker
-      executablePath:
-        process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage", // Writes temp files to disk, not RAM
+        "--disable-dev-shm-usage",
         "--disable-accelerated-2d-canvas",
         "--disable-gpu",
-        "--no-first-run",
-        "--no-zygote",
-        "--single-process", // Critical for 512MB RAM
+        "--window-size=1920,1080",
       ],
     });
 
     const page = await browser.newPage();
-
-    // Block heavy assets
-    await page.setRequestInterception(true);
-    page.on("request", (req) => {
-      if (
-        ["image", "media", "font", "stylesheet", "other"].includes(
-          req.resourceType()
-        )
-      ) {
-        req.abort();
-      } else {
-        req.continue();
-      }
-    });
-
-    // Use standard User Agent
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     );
@@ -52,29 +26,7 @@ export const checkWebsiteForKeyword = async (url, keyword, requiredContext) => {
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 
     // ==============================
-    // 📦 AMAZON PINCODE FIX
-    // ==============================
-    if (url.includes("amazon")) {
-      try {
-        const locationText = await page.evaluate(
-          () => document.getElementById("glow-ingress-line1")?.innerText
-        );
-        if (locationText && locationText.includes("Select your address")) {
-          console.log("📍 Amazon needs Pincode...");
-          await page.click("#nav-global-location-popover-link");
-          await new Promise((r) => setTimeout(r, 2000));
-          await page.type("#GLUXZipUpdateInput", "110001", { delay: 100 });
-          await page.click("#GLUXZipUpdate");
-          await new Promise((r) => setTimeout(r, 2000));
-          await page.reload({ waitUntil: "domcontentloaded" });
-        }
-      } catch (err) {
-        console.log("⚠️ Pincode setup skipped:", err.message);
-      }
-    }
-
-    // ==============================
-    // 🖱️ CLICK LOGIC (Amazon & Flipkart)
+    // 🛍️ FLIPKART LOGIC
     // ==============================
     if (url.includes("flipkart.com")) {
       try {
@@ -112,31 +64,105 @@ export const checkWebsiteForKeyword = async (url, keyword, requiredContext) => {
       } catch (err) {
         console.log("⚠️ Flipkart click error:", err.message);
       }
-    } else if (url.includes("amazon")) {
+    }
+
+    // ==============================
+    // 📦 AMAZON LOGIC (DEBUGGER)
+    // ==============================
+    else if (url.includes("amazon")) {
       try {
-        console.log("🕵️ Detected Amazon. Looking for EMI...");
-        await page.evaluate(() => window.scrollBy(0, 300));
+        console.log("🕵️ Detected Amazon. Analyzing page...");
+        await page.evaluate(() => window.scrollBy(0, 400));
         await new Promise((r) => setTimeout(r, 2000));
-        const emiButton = await page.$("#incontext_emiLink");
-        if (emiButton) {
-          await emiButton.click();
-          console.log("🖱️ Clicked ID");
-        } else {
-          await page.evaluate(() => {
-            const links = Array.from(document.querySelectorAll("a, span"));
-            for (let el of links) {
-              if (el.innerText?.toLowerCase() === "emi options") el.click();
+
+        // DEBUG: Print all "EMI" related text found on the screen
+        const emiTexts = await page.evaluate(() => {
+          const allElements = document.querySelectorAll("a, span, div");
+          let results = [];
+          allElements.forEach((el) => {
+            if (
+              el.innerText &&
+              el.innerText.toLowerCase().includes("emi options") &&
+              el.innerText.length < 50
+            ) {
+              results.push(
+                `Found Tag: <${el.tagName}> Text: "${el.innerText}"`
+              );
             }
           });
+          return [...new Set(results)]; // Remove duplicates
+        });
+
+        console.log("🔎 VISIBLE EMI LINKS FOUND:", emiTexts);
+
+        // CLICKER LOGIC
+        const clickResult = await page.evaluate(() => {
+          // 1. Try strict "EMI options" link
+          const links = Array.from(document.querySelectorAll("a, span"));
+          for (let el of links) {
+            const t = el.innerText ? el.innerText.trim().toLowerCase() : "";
+            if (t === "emi options" || t === "details") {
+              // Must be inside a relevant container
+              const parent = el.closest(".a-section") || el.parentElement;
+              const parentText = parent ? parent.innerText.toLowerCase() : "";
+
+              if (
+                parentText.includes("emi") ||
+                parentText.includes("no cost")
+              ) {
+                el.click();
+                return `Clicked "${t}"`;
+              }
+            }
+          }
+          return false;
+        });
+
+        if (clickResult) {
+          console.log(`🖱️ Amazon: ${clickResult}`);
+          console.log("⏳ Waiting for EMI data...");
+          await new Promise((r) => setTimeout(r, 5000));
+
+          // SMART POPUP READER (Filters out "Feedback" garbage)
+          const bankData = await page.evaluate(() => {
+            // Get ALL popup contents
+            const popups = Array.from(
+              document.querySelectorAll(".a-popover-content, .a-popover-inner")
+            );
+
+            for (let p of popups) {
+              const t = p.innerText.toLowerCase();
+              // Only return if it looks like financial data
+              if (
+                t.includes("interest") ||
+                t.includes("bank") ||
+                t.includes("credit card") ||
+                t.includes("amazon pay")
+              ) {
+                return t;
+              }
+            }
+            return null;
+          });
+
+          if (bankData) {
+            console.log("\n🏦 VALID BANK DATA RECEIVED:");
+            console.log(bankData.substring(0, 200).replace(/\n/g, ", "));
+          } else {
+            console.log(
+              "⚠️ Popup opened, but no financial text found (Might need Pincode)."
+            );
+          }
+        } else {
+          console.log("⚠️ Could not click any EMI button.");
         }
-        await new Promise((r) => setTimeout(r, 5000));
       } catch (err) {
         console.log("⚠️ Amazon click error:", err.message);
       }
     }
 
     // ==============================
-    // 🔍 SEARCH
+    // 🔍 TEXT SEARCH
     // ==============================
     const pageText = await page.evaluate(() =>
       document.body.innerText.toLowerCase().replace(/\s+/g, " ")
@@ -147,8 +173,9 @@ export const checkWebsiteForKeyword = async (url, keyword, requiredContext) => {
     if (pageText.includes(mainWord) && pageText.includes(contextWord)) {
       let searchIndex = 0;
       while ((searchIndex = pageText.indexOf(mainWord, searchIndex)) !== -1) {
-        const start = Math.max(0, searchIndex - 3000);
-        const end = Math.min(pageText.length, searchIndex + 3000);
+        // Massive range for Amazon HTML structure
+        const start = Math.max(0, searchIndex - 3500);
+        const end = Math.min(pageText.length, searchIndex + 3500);
         const windowText = pageText.substring(start, end);
 
         if (windowText.includes(contextWord)) {
@@ -167,7 +194,6 @@ export const checkWebsiteForKeyword = async (url, keyword, requiredContext) => {
     return false;
   } catch (error) {
     if (browser) await browser.close();
-    console.timeEnd("Scrape Duration");
     console.error(`❌ Error: ${error.message}`);
     return false;
   }
