@@ -1,21 +1,21 @@
-# 1. Use an official Puppeteer image (Comes with Node + Chrome installed)
+# 1. Use an official Puppeteer image
 FROM ghcr.io/puppeteer/puppeteer:21.5.2
 
-# 2. Skip downloading Chrome again (because the image already has it)
+# 2. Set environment variables
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable \
+    # CRITICAL: Tell Node.js to use a maximum of 400MB of RAM
+    NODE_OPTIONS="--max-old-space-size=400"
 
 # 3. Set the working directory
 WORKDIR /usr/src/app
 
-# 4. Copy package files
+# 4. Copy and install dependencies
 COPY package*.json ./
-
-# 5. Install dependencies
 RUN npm ci
 
-# 6. Copy the rest of your code
+# 5. Copy the rest of your code
 COPY . .
 
-# 7. Start the server
+# 6. Start the server
 CMD [ "node", "server.js" ]

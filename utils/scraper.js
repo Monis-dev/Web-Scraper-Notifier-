@@ -22,17 +22,20 @@ export const checkWebsiteForKeyword = async (url, keyword, requiredContext) => {
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
+        "--disable-dev-shm-usage", // Use disk instead of RAM for temp files
         "--disable-accelerated-2d-canvas",
         "--disable-gpu",
-        "--window-size=1920,1080", // Force a desktop window size
+        "--window-size=1920,1080",
+        "--no-first-run", // Skip welcome pages
+        "--no-zygote", // Helps disable sandboxing
+        "--disable-extensions", // Don't load any extensions
       ],
     };
 
     // If running on Render (Docker), add specific settings
     if (isProduction) {
       launchConfig.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
-      launchConfig.args.push("--single-process"); // Crucial for low-RAM environments
+      launchConfig.args.push("--single-process"); // CRITICAL for low-RAM
     }
 
     browser = await puppeteer.launch(launchConfig);
